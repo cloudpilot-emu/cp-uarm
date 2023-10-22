@@ -19,32 +19,19 @@
 #include <ctime>
 
 #include "MainLoop.h"
+#include "SdlRenderer.h"
 #include "SoC.h"
 #include "device.h"
+#include "util.h"
 
 using namespace std;
 
 namespace {
     constexpr uint32_t SD_SECTOR_SIZE = 512ULL;
-
-    struct MainLoopContext {
-        uint64_t cycles_per_second;
-
-        uint64_t real_time_musec;
-        double virtual_time_musec;
-
-        Average<uint64_t> average_cycles_per_second;
-    };
+    constexpr int SCALE = 2;
 
     uint8_t* sdCardData = NULL;
     size_t sdCardSecs = 0;
-
-    uint64_t timestampUsec() {
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-
-        return ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
-    }
 
     void usage(const char* self) {
         fprintf(stderr,
@@ -54,14 +41,14 @@ namespace {
         exit(-1);
     }
 
-    bool prvSdSectorR(uint32_t secNum, void* buf) {
+    extern "C" bool prvSdSectorR(uint32_t secNum, void* buf) {
         if (secNum >= sdCardSecs) return false;
 
         memcpy(buf, sdCardData + SD_SECTOR_SIZE * secNum, SD_SECTOR_SIZE);
         return true;
     }
 
-    bool prvSdSectorW(uint32_t secNum, const void* buf) {
+    extern "C" bool prvSdSectorW(uint32_t secNum, const void* buf) {
         if (secNum >= sdCardSecs) return false;
 
         memcpy(sdCardData + SD_SECTOR_SIZE * secNum, buf, SD_SECTOR_SIZE);
@@ -219,53 +206,23 @@ int main(int argc, char** argv) {
 
     SDL_Window* window;
     SDL_Renderer* renderer;
-    const int scale = 2;
 
-    initSdl(displayConfiguration, scale, &window, &renderer);
-
-    SDL_Texture* texture =
-        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
-                          displayConfiguration.width, displayConfiguration.height);
+    initSdl(displayConfiguration, SCALE, &window, &renderer);
 
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0xff);
     SDL_RenderClear(renderer);
 
-    MainLoop mainLoop(soc, 100000000);
+    MainLoop mainLoop(soc, 100000000, SCALE);
+    SdlRenderer sdlRenderer(window, renderer, soc, SCALE);
 
     while (true) {
-        uint64_t now = timestampUsec();
+        const uint64_t now = timestampUsec();
+
         mainLoop.Cycle();
+        sdlRenderer.Draw();
 
-        uint32_t* frame = socGetPendingFrame(soc);
-        if (frame) {
-            uint8_t* pixels;
-            int pitch;
-            SDL_LockTexture(texture, NULL, (void**)&pixels, &pitch);
-
-            if (pitch == 4 * displayConfiguration.width) {
-                memcpy(pixels, frame, 4 * displayConfiguration.width * displayConfiguration.height);
-            } else {
-                for (int y = 0; y < displayConfiguration.height; y++) {
-                    memcpy(pixels, frame, 4 * displayConfiguration.width);
-                    frame += displayConfiguration.width;
-                    pixels += pitch;
-                }
-            }
-
-            SDL_UnlockTexture(texture);
-
-            SDL_Rect src = {
-                .x = 0, .y = 0, .w = displayConfiguration.width, .h = displayConfiguration.height};
-            SDL_Rect dest = {.x = 0, .y = 0, .w = scale * src.w, .h = scale * src.h};
-
-            SDL_RenderClear(renderer);
-            SDL_RenderCopy(renderer, texture, &src, &dest);
-            SDL_RenderPresent(renderer);
-
-            socResetPendingFrame(soc);
-        }
-
-        int64_t timesliceRemaining = 1000000 / 50 - static_cast<int64_t>(timestampUsec() - now);
+        const int64_t timesliceRemaining =
+            mainLoop.GetTimesliceSizeUsec() - static_cast<int64_t>(timestampUsec() - now);
         if (timesliceRemaining > 10) usleep(timesliceRemaining);
     }
 

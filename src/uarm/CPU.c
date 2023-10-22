@@ -479,8 +479,9 @@ static uint_fast8_t cpuPrvArmAdrMode_2(struct ArmCpu *cpu, uint32_t instr, uint3
         val = instr & 0xFFFUL;
     else {  //[scaled] register
 
-        if (instr & 0x00000010UL) reg |= ARM_MODE_2_INV;  // invalid instrucitons need to be
-                                                          // reported
+        if (instr & 0x00000010UL)
+            reg |= ARM_MODE_2_INV;  // invalid instrucitons need to be
+                                    // reported
 
         val = cpuPrvGetRegNotPC(cpu, instr & 0x0F, wasT, specialPC);
         shift = (instr >> 7) & 0x1F;
@@ -1448,7 +1449,7 @@ static void cpuPrvExecInstr(struct ArmCpu *cpu, uint32_t instr, bool wasT, bool 
         case 2:
         case 3:  // data process immediate val, move imm to SR
 
-        data_processing :  // data processing
+        data_processing:  // data processing
         {
             bool cOut, setFlags = !!(instr & 0x00100000UL);
 
@@ -1592,7 +1593,7 @@ static void cpuPrvExecInstr(struct ArmCpu *cpu, uint32_t instr, bool wasT, bool 
                 cpuPrvSetPSRhi8(cpu, sr);
                 cpu->regs[REG_NO_PC] = res;  // do it right here - if we let it use cpuPrvSetReg, it
                                              // will check lower bit...
-            } else {  // store and set flags
+            } else {                         // store and set flags
 
                 cpuPrvSetReg(cpu, (instr >> 12) & 0x0F, res);
 
