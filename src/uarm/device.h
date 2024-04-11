@@ -29,6 +29,8 @@
 extern "C" {
 #endif
 
+struct AudioQueue;
+
 struct DeviceDisplayConfiguration {
     uint16_t width;
     uint16_t height;
@@ -77,11 +79,16 @@ struct Device *deviceSetup(struct SocPeriphs *sp, struct Reschedule reschedule, 
                            struct VSD *vsd, uint8_t *nandContent, size_t nandSize);
 void deviceKey(struct Device *dev, uint32_t key, bool down);
 void devicePeriodic(struct Device *dev, uint32_t tier);
+void devicePcmPeriodic(struct Device *dev);
 void deviceTouch(struct Device *dev, int x, int y);
 
 void deviceGetDisplayConfiguration(struct DeviceDisplayConfiguration *displayConfiguration);
 
 bool deviceTaskRequired(struct Device *dev, uint32_t tier);
+
+void deviceSetAudioQueue(struct Device *dev, struct AudioQueue *audioQueue);
+
+bool deviceI2sConnected();
 
 #ifdef __cplusplus
 }

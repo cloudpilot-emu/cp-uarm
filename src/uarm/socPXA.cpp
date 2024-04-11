@@ -190,6 +190,31 @@ static void socPrvReschedule(void *ctx, uint32_t task) {
 }
 }
 
+static void setupScheduler(Scheduler<SoC> *scheduler) {
+    // Timer: 3.6864 MHz
+    scheduler->ScheduleTask(SCHEDULER_TASK_TIMER, 1_sec / 3686400ULL, 1);
+
+    // RTC: 1 Hz
+    scheduler->ScheduleTask(SCHEDULER_TASK_RTC, 1_sec, 1);
+
+    // LCD: one frame every 64 ticks, 3 ticks per frame, 60 FPS -> 11.52 kHz
+    scheduler->ScheduleTask(SCHEDULER_TASK_LCD, 1_sec / (64 * 3 * 60), 1);
+
+    // Periodic tasks 0: every 36 timer ticks -> 102.4 kHz
+    scheduler->ScheduleTask(SCHEDULER_TASK_AUX_1, 36_sec / 3686400ULL, 1);
+
+    // PCM -> run at 44.1 kHz to match PalmOS sample rate
+    scheduler->ScheduleTask(SCHEDULER_TASK_PCM, 1_sec / 44100, 1);
+
+    if (deviceI2sConnected()) {
+        // I2S -> run at 44.1 kHz
+        scheduler->ScheduleTask(SCHEDULER_TASK_I2S, 1_sec / 44100, 1);
+    }
+
+    // Pump event queues: 25 Hz
+    scheduler->ScheduleTask(SCHEDULER_TASK_AUX_2, 1_sec / 25, 1);
+}
+
 SoC *socInit(void *romData, const uint32_t romSize, uint32_t sdNumSectors, SdSectorR sdR,
              SdSectorW sdW, uint8_t *nandContent, size_t nandSize, int gdbPort,
              uint_fast8_t socRev) {
@@ -204,6 +229,7 @@ SoC *socInit(void *romData, const uint32_t romSize, uint32_t sdNumSectors, SdSec
     soc->pacePatch = createPacePatch();
 
     soc->scheduler = new Scheduler<SoC>(*soc);
+    setupScheduler(soc->scheduler);
 
     soc->penEventQueue = new Queue<PenEvent>(EVENT_QUEUE_CAPACITY);
     soc->keyEventQueue = new Queue<KeyEvent>(EVENT_QUEUE_CAPACITY);
@@ -417,24 +443,6 @@ SoC *socInit(void *romData, const uint32_t romSize, uint32_t sdNumSectors, SdSec
 
     if (sp.dbgUart) socUartSetFuncs(sp.dbgUart, socUartPrvRead, socUartPrvWrite, soc->hwUart);
 
-    // Timer: 3.6864 MHz
-    soc->scheduler->ScheduleTask(SCHEDULER_TASK_TIMER, 1_sec / 3686400ULL, 1);
-
-    // RTC: 1 Hz
-    soc->scheduler->ScheduleTask(SCHEDULER_TASK_RTC, 1_sec, 1);
-
-    // LCD: one frame every 64 ticks, 3 ticks per frame, 60 FPS -> 11.52 kHz
-    soc->scheduler->ScheduleTask(SCHEDULER_TASK_LCD, 1_sec / (64 * 3 * 60), 1);
-
-    // Periodic tasks 1: every 36 timer ticks -> 102.4 kHz
-    soc->scheduler->ScheduleTask(SCHEDULER_TASK_AUX_1, 36_sec / 3686400ULL, 1);
-
-    // Periodic tasks 1: every 292 timer ticks -> ~12.6 kHz
-    soc->scheduler->ScheduleTask(SCHEDULER_TASK_AUX_2, 292_sec / 3686400ULL, 1);
-
-    // Pump event queues: 25 Hz
-    soc->scheduler->ScheduleTask(SCHEDULER_TASK_AUX_3, 40_msec, 1);
-
     /*
             var gpio = {latches: [0x30000, 0x1400001, 0x200], inputs: [0x786c06, 0x100, 0x0],
        levels: [0x7b6c04, 0x1400101, 0x200], dirs: [0xcf878178, 0xffd1beff, 0x1ffff], riseDet:
@@ -551,12 +559,6 @@ static void socCycleBatch0(struct SoC *soc) {
     devicePeriodic(soc->dev, DEVICE_PERIODIC_TIER0);
 }
 
-static void socCycleBatch1(struct SoC *soc) {
-    socAC97Periodic(soc->ac97);
-    socI2sPeriodic(soc->i2s);
-    devicePeriodic(soc->dev, DEVICE_PERIODIC_TIER1);
-}
-
 static bool socPrvBatch0Required(struct SoC *soc) {
     if (!soc->dev) return true;
 
@@ -592,20 +594,25 @@ uint32_t SoC::DispatchTicks(uint32_t clientType, uint32_t batchedTicks) {
             pxaLcdTick(lcd);
             return 1;
 
+        case SCHEDULER_TASK_I2S:
+            socI2sPeriodic(i2s);
+            return 1;
+
+        case SCHEDULER_TASK_PCM:
+            devicePcmPeriodic(dev);
+            return 1;
+            break;
+
         case SCHEDULER_TASK_AUX_1:
             socCycleBatch0(this);
             return socPrvBatch0Required(this) ? 1 : 0;
 
         case SCHEDULER_TASK_AUX_2:
-            socCycleBatch1(this);
-            return 1;
-
-        case SCHEDULER_TASK_AUX_3:
             socPumpEventQueues(this);
             return 1;
 
         default:
-            ERR("invalid client type");
+            ERR("invalid client type\n");
     }
 }
 
@@ -641,4 +648,8 @@ bool socSetFramebuffer(struct SoC *soc, uint32_t start, uint32_t size) {
     ramSetFramebuffer(soc->ram, start, size);
 
     return size != 0;
+}
+
+void socSetAudioQueue(struct SoC *soc, struct AudioQueue *audioQueue) {
+    deviceSetAudioQueue(soc->dev, audioQueue);
 }
