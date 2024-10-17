@@ -1,3 +1,9 @@
+# Deprecation notice
+
+This repository is now deprecated. The code has been integrated into the
+[CloudpilotEmu codebase](https://github.com/cloudpilot-emu/cloudpilot-emu),
+and all further development will happen there.
+
 This is the CloudpilotEmu fork of Dmitry Grinberg's
 [uARM](https://github.com/uARM-Palm/uARM). The codebase currently supports only
 the Tungsten E2. The goal is to rework and optimize uARM to the point where it
